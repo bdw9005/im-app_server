@@ -41,13 +41,13 @@ public class ChatAdmin {
         ChatAdmin.init("http://localhost:18080", "123456");
         Conversation conv = new Conversation();
         conv.setLine(0);
-        conv.setTarget("world");
-        conv.setType(0);
+        conv.setTarget("chatroom1");
+        conv.setType(2);
         MessagePayload payload = new MessagePayload();
         payload.setType(1);
-        payload.setContent("hello world");
+        payload.setSearchableContent("hello world");
         try {
-            IMResult<SendMessageResult> result = ChatAdmin.sendMessage("hello", conv, payload);
+            IMResult<SendMessageResult> result = ChatAdmin.sendMessage("FHFQFQ00", conv, payload);
             if (result != null) {
                 System.out.println("send message with message uid " + result.getResult().getMessageUid());
             }

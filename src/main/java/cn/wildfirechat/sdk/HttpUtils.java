@@ -3,6 +3,7 @@ package cn.wildfirechat.sdk;
 import cn.wildfirechat.sdk.model.IMResult;
 import com.google.gson.Gson;
 import ikidou.reflect.TypeBuilder;
+import okhttp3.*;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -15,9 +16,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 
 public class HttpUtils {
@@ -31,6 +36,9 @@ public class HttpUtils {
         adminSecret = secret;
     }
 
+    public static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    static private OkHttpClient client = new OkHttpClient();
+
     static <T> IMResult<T> httpJsonPost(String path, Object object, Class<T> clazz) throws Exception{
         if (isNullOrEmpty(adminUrl) || isNullOrEmpty(path)) {
             LOG.error("Not init IM SDK correctly. Do you forget init it?");
@@ -38,60 +46,59 @@ public class HttpUtils {
         }
 
         String url = adminUrl + path;
-        HttpPost post = null;
         try {
-            HttpClient httpClient = HttpClientBuilder.create().build();
-
             int nonce = (int)(Math.random() * 100000 + 3);
             long timestamp = System.currentTimeMillis();
             String str = nonce + "|" + adminSecret + "|" + timestamp;
             String sign = DigestUtils.sha1Hex(str);
 
 
-            post = new HttpPost(url);
-            post.setHeader("Content-type", "application/json; charset=utf-8");
-            post.setHeader("Connection", "Keep-Alive");
-            post.setHeader("nonce", nonce + "");
-            post.setHeader("timestamp", "" + timestamp);
-            post.setHeader("sign", sign);
 
             String jsonStr = new Gson().toJson(object);
             LOG.info("http request content: {}", jsonStr);
 
-            StringEntity entity = new StringEntity(jsonStr, Charset.forName("UTF-8"));
-            entity.setContentEncoding("UTF-8");
-            entity.setContentType("application/json");
-            post.setEntity(entity);
-            HttpResponse response = httpClient.execute(post);
 
-            int statusCode = response.getStatusLine().getStatusCode();
-            if(statusCode != HttpStatus.SC_OK){
-                LOG.info("Request error: "+statusCode);
-                throw new Exception("Http request error with code:" + statusCode);
-            }else{
-                BufferedReader in = new BufferedReader(new InputStreamReader(response.getEntity()
-                    .getContent(),"utf-8"));
-                StringBuffer sb = new StringBuffer();
-                String line;
-                String NL = System.getProperty("line.separator");
-                while ((line = in.readLine()) != null) {
-                    sb.append(line + NL);
+
+            RequestBody body = RequestBody.create(JSON, jsonStr);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .addHeader("Connection", "Keep-Alive")
+                    .addHeader("nonce", nonce + "")
+                    .addHeader("timestamp", "" + timestamp)
+                    .addHeader("sign", sign)
+                    .post(body)
+                    .build();
+
+            CountDownLatch latch = new CountDownLatch(1);
+            final List<String> responseContainer = new ArrayList<String>();
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    e.printStackTrace();
+                    LOG.info("POST to {} with data {} failure", url, jsonStr);
+                    latch.countDown();
                 }
 
-                in.close();
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    String responseBody = response.body().string();
+                    responseContainer.add(responseBody);
+                    LOG.info("POST to {} success with response", url, responseBody);
+                    latch.countDown();
+                }
+            });
 
-                String content = sb.toString();
-                LOG.info("http request response content: {}", content);
 
-                return fromJsonObject(content, clazz);
+            latch.await();
+
+            if (responseContainer.size() == 0) {
+                return null;
             }
+
+            return fromJsonObject(responseContainer.get(0), clazz);
         } catch (Exception e) {
             e.printStackTrace();
             throw e;
-        }finally{
-            if(post != null){
-                post.releaseConnection();
-            }
         }
     }
 
